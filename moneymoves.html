@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Money Flow Web Tracker</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- D3.js for Data Visualization and Force Graph -->
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* Dark GitHub/Terminal background */
+            color: #c9d1d9;
+            overflow: hidden;
+        }
+
+        /* Custom styling for the timeline slider */
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 8px;
+            background: #2a333d;
+            border-radius: 4px;
+            outline: none;
+            transition: opacity .2s;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #58a6ff; /* Blue accent */
+            cursor: pointer;
+            box-shadow: 0 0 5px rgba(88, 166, 255, 0.5);
+        }
+
+        /* Styling for the SVG visualization container */
+        #visualization {
+            width: 100%;
+            height: calc(100vh - 12rem); /* Full height minus header/footer area */
+            background-color: #0d1117;
+        }
+
+        /* D3 Node/Link styles */
+        .link {
+            stroke: rgba(88, 166, 255, 0.4);
+            stroke-width: 2px;
+        }
+        .node {
+            cursor: pointer;
+            stroke: #c9d1d9;
+            stroke-width: 2px;
+            transition: fill 0.3s, r 0.3s;
+        }
+        .node:hover {
+            stroke-width: 4px;
+        }
+    </style>
+</head>
+<body class="antialiased flex flex-col h-screen">
+
+    <!-- Header and Total Counter -->
+    <header class="bg-[#161b22] shadow-lg p-4 flex items-center justify-between z-10">
+        <h1 class="text-3xl font-extrabold text-[#58a6ff]">
+            Money Flow Web
+        </h1>
+        <div class="text-center">
+            <p class="text-xs uppercase tracking-wider text-gray-400">Total Money Visualized (USD)</p>
+            <p id="total-dollars" class="text-5xl font-mono font-bold text-white transition-all duration-300">
+                $0
+            </p>
+        </div>
+        <div class="text-right">
+            <p class="text-xs uppercase tracking-wider text-gray-400">Current Official</p>
+            <p id="current-official-display" class="text-xl font-semibold text-white">K. Bassoon (Current Mayor)</p>
+        </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="flex flex-grow overflow-hidden">
+        
+        <!-- Sidebar for Official Selection -->
+        <div id="sidebar" class="w-64 bg-[#161b22] p-4 flex-shrink-0 border-r border-[#2a333d] transition-all duration-300 ease-in-out">
+            <div class="flex justify-between items-center mb-4">
+                <h2 id="sidebar-title" class="text-lg font-semibold text-gray-300 transition-opacity duration-300">Select Official</h2>
+                <button id="toggle-sidebar-btn" class="p-1 rounded-full text-gray-400 hover:bg-[#2a333d] transition">
+                    <!-- Collapse Icon (Default) -->
+                    <svg id="collapse-icon" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 15l-3-3m0 0l3-3m-3 3h8"></path></svg>
+                    <!-- Expand Icon (Hidden by default) -->
+                    <svg id="expand-icon" class="w-5 h-5 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 9l3 3m0 0l-3 3m3-3H5"></path></svg>
+                </button>
+            </div>
+            <div id="sidebar-content" class="space-y-2">
+                <!-- Buttons will be dynamically generated here -->
+            </div>
+        </div>
+
+        <!-- Visualization and Timeline -->
+        <div class="flex-grow flex flex-col p-4">
+            
+            <!-- D3 Visualization Area -->
+            <svg id="visualization" class="rounded-lg shadow-xl border border-[#2a333d] mb-4"></svg>
+
+            <!-- Timeline Control -->
+            <div class="bg-[#161b22] p-4 rounded-lg shadow-lg">
+                <div class="flex justify-between text-sm font-semibold text-gray-400 mb-2">
+                    <span id="start-date-label"></span>
+                    <span id="current-date-label" class="text-white font-bold"></span>
+                    <span id="end-date-label"></span>
+                </div>
+                <input type="range" id="timeline-slider" min="0" max="100" value="0" step="1" disabled>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // --- DATA DEFINITIONS ---
+
+        // Official definitions (used for sidebar and visualization center)
+        const OFFICIALS = [
+            { id: "K. Bassoon", display: "K. Bassoon (Current Mayor)", color: "#58a6ff" },
+            { id: "E. Garcetti-Pants", display: "E. Garcetti-Pants (Former Mayor)", color: "#e36060" },
+            { id: "A. Villa-Rigatoni", display: "A. Villa-Rigatoni (Former Mayor)", color: "#44c767" }
+        ];
+
+        // Combined Mock contributions data, keyed by official ID
+        const ALL_CONTRIBUTION_DATA = {
+            "K. Bassoon": [
+                // Existing and new data for K. Bassoon
+                { date: 202201, source: "LA Police Protective League", amount: 50000, type: "Police Union" },
+                { date: 202203, source: "Affordable Housing PAC", amount: 150000, type: "Developer" },
+                { date: 202205, source: "SEIU Local 721", amount: 100000, type: "Labor Union" },
+                { date: 202206, source: "Entertainment Executive A", amount: 75000, type: "Private Donor" },
+                { date: 202301, source: "LA Police Protective League", amount: 25000, type: "Police Union" },
+                { date: 202303, source: "Gig Economy Coalition", amount: 120000, type: "Tech Lobby" }, // New
+                { date: 202307, source: "Commercial Real Estate Group", amount: 200000, type: "Developer" },
+                { date: 202402, source: "Climate Action Fund", amount: 40000, type: "Advocacy Group" },
+                { date: 202405, source: "SEIU Local 721", amount: 50000, type: "Labor Union" },
+                { date: 202409, source: "Beverly Hills Hotel Trust", amount: 180000, type: "Developer" }, // New
+                { date: 202410, source: "Voter Registration Drive", amount: 20000, type: "Advocacy Group" },
+                { date: 202411, source: "Public Art Foundation", amount: 30000, type: "Advocacy Group" }, // New
+            ],
+            "E. Garcetti-Pants": [
+                // New data for E. Garcetti-Pants
+                { date: 201705, source: "Hollywood Studio Executives", amount: 300000, type: "Private Donor" },
+                { date: 201801, source: "LA Water & Power Union", amount: 80000, type: "Labor Union" },
+                { date: 201809, source: "Oil & Gas PAC", amount: 250000, type: "Energy Lobby" },
+                { date: 201904, source: "Neighborhood Councils Fund", amount: 10000, type: "Advocacy Group" },
+                { date: 202011, source: "Tech Unicorn Founders", amount: 400000, type: "Tech Lobby" },
+                { date: 202102, source: "US-India Policy Council", amount: 150000, type: "Advocacy Group" },
+                { date: 202108, source: "Beverly Hills Hotel Trust", amount: 90000, type: "Developer" },
+            ],
+            "A. Villa-Rigatoni": [
+                // New data for A. Villa-Rigatoni
+                { date: 200607, source: "Downtown Investment Group", amount: 180000, type: "Developer" },
+                { date: 200702, source: "Charter School Advocates", amount: 110000, type: "Education" },
+                { date: 200810, source: "Transport Workers Union", amount: 90000, type: "Labor Union" },
+                { date: 200905, source: "LA Unified School District PAC", amount: 50000, type: "Education" },
+                { date: 201012, source: "International Trade Association", amount: 150000, type: "Tech Lobby" },
+                { date: 201104, source: "Police Union Rank & File", amount: 40000, type: "Police Union" },
+                { date: 201201, source: "Real Estate Developers", amount: 220000, type: "Developer" },
+            ]
+        };
+
+        // Define a color map for different types of contributors (including new types)
+        const COLOR_MAP = {
+            "Official": "var(--official-color)", // Placeholder to be set dynamically
+            "Developer": "#44c767", // Green
+            "Labor Union": "#f3c260", // Yellow/Orange
+            "Police Union": "#e95454", // Red
+            "Private Donor": "#9d8aff", // Purple
+            "Advocacy Group": "#60e3e3", // Cyan
+            "Tech Lobby": "#80e954", // Bright Green
+            "Energy Lobby": "#e9d054", // Olive/Yellow
+            "Education": "#8054e9" // Indigo/Purple
+        };
+        
+        // --- GLOBAL STATE ---
+        let CURRENT_OFFICIAL_ID = OFFICIALS[0].id;
+        let OFFICIAL_NODE_DEFINITION = {}; // Will hold the official's properties
+        let svg, width, height, simulation;
+        let nodesData = []; // Nodes currently in the simulation
+        let linksData = []; // Links currently in the simulation
+        let previousTotal = 0; // State for dollar animation
+
+        // --- D3 SETUP ---
+
+        function initializeD3() {
+            svg = d3.select("#visualization");
+            
+            // Clear previous content
+            svg.selectAll('*').remove();
+
+            // Append groups for links, nodes, and labels
+            svg.append("g").attr("id", "links");
+            svg.append("g").attr("id", "nodes");
+            svg.append("g").attr("id", "labels");
+
+            // Initialize simulation (forces will be updated in handleResize)
+            simulation = d3.forceSimulation(nodesData)
+                .force("link", d3.forceLink(linksData).id(d => d.id).distance(150).strength(0.2))
+                .force("charge", d3.forceManyBody().strength(-800))
+                .force("center", d3.forceCenter(0, 0)) // Initial 0,0 - updated in handleResize
+                .force("x", d3.forceX(0).strength(0.05))
+                .force("y", d3.forceY(0).strength(0.05))
+                .on("tick", ticked);
+
+            // Re-run handleResize to set initial dimensions and center force
+            handleResize(); 
+        }
+
+        // Ticked function updates positions on screen
+        function ticked() {
+            d3.select("#links").selectAll("line")
+                .attr("x1", d => d.source.x)
+                .attr("y1", d => d.source.y)
+                .attr("x2", d => d.target.x)
+                .attr("y2", d => d.target.y);
+
+            d3.select("#nodes").selectAll("circle")
+                .attr("cx", d => d.x)
+                .attr("cy", d => d.y);
+            
+            d3.select("#labels").selectAll("text")
+                .attr("x", d => d.x + d.radius + 5)
+                .attr("y", d => d.y + 4);
+        }
+
+        // --- VISUALIZATION UPDATE FUNCTION ---
+
+        function updateVisualization(maxDate) {
+            const CONTRIBUTION_DATA = ALL_CONTRIBUTION_DATA[CURRENT_OFFICIAL_ID];
+            let currentTotal = 0;
+            const sourceMap = new Map();
+
+            // 1. Filter and aggregate contributions
+            const filteredContributions = CONTRIBUTION_DATA.filter(d => d.date <= maxDate);
+
+            filteredContributions.forEach(contribution => {
+                currentTotal += contribution.amount;
+                
+                if (sourceMap.has(contribution.source)) {
+                    sourceMap.get(contribution.source).total += contribution.amount;
+                } else {
+                    sourceMap.set(contribution.source, {
+                        id: contribution.source,
+                        type: contribution.type,
+                        total: contribution.amount,
+                    });
+                }
+            });
+
+            // --- Node Position Preservation (Fix for Request 1) ---
+            // Create a map of existing nodes to retrieve their current (x, y) coordinates
+            const existingNodeMap = new Map(nodesData.map(d => [d.id, d])); 
+
+            // 2. Build the final nodes and links arrays
+            const currentOfficial = OFFICIAL_NODE_DEFINITION;
+            currentOfficial.total = currentTotal;
+            currentOfficial.radius = Math.min(30, 20 + Math.log(currentTotal / 100000) * 2);
+            currentOfficial.fx = width / 2; // Always fixed
+            currentOfficial.fy = height / 2; // Always fixed
+            
+            // Retain official's current position if available (though fx/fy prevent movement)
+            Object.assign(currentOfficial, existingNodeMap.get(CURRENT_OFFICIAL_ID));
+
+            const newNodes = [currentOfficial];
+            const currentLinks = [];
+
+            sourceMap.forEach(sourceData => {
+                // Check if this source existed before
+                const existing = existingNodeMap.get(sourceData.id);
+
+                const newNode = {
+                    ...sourceData,
+                    color: COLOR_MAP[sourceData.type],
+                    radius: Math.min(25, 6 + Math.log(sourceData.total / 1000) * 2)
+                };
+
+                // If the node existed, inherit its x and y position to prevent jump
+                if (existing) {
+                    newNode.x = existing.x;
+                    newNode.y = existing.y;
+                }
+                
+                newNodes.push(newNode);
+                
+                // Add link from source to official
+                currentLinks.push({
+                    source: sourceData.id,
+                    target: CURRENT_OFFICIAL_ID,
+                    value: sourceData.total
+                });
+            });
+
+            // 3. Update D3 data
+            nodesData = newNodes;
+            linksData = currentLinks;
+
+            // 4. Update the total dollar display with animation (Fix for Request 2)
+            const totalDollarsElement = d3.select('#total-dollars');
+
+            totalDollarsElement
+                .transition()
+                .duration(300) // Fast transition time (0.3s)
+                .ease(d3.easeLinear)
+                .tween("text", function() {
+                    const i = d3.interpolateNumber(previousTotal, currentTotal);
+                    return function(t) {
+                        this.textContent = new Intl.NumberFormat('en-US', { 
+                            style: 'currency', 
+                            currency: 'USD', 
+                            minimumFractionDigits: 0 
+                        }).format(Math.round(i(t))); // Round the interpolated value
+                    };
+                });
+            previousTotal = currentTotal; // Update global state for next animation
+
+            // 5. Apply data binding to SVG (Nodes)
+            const nodesSelection = d3.select("#nodes").selectAll("circle")
+                .data(nodesData, d => d.id);
+            
+            nodesSelection.join(
+                enter => enter.append("circle")
+                    .attr("class", "node")
+                    .attr("r", 0) 
+                    .attr("fill", d => d.id === CURRENT_OFFICIAL_ID ? currentOfficial.color : d.color)
+                    .call(enter => enter.transition().duration(750) 
+                        .attr("r", d => d.radius)),
+                update => update.transition().duration(500)
+                    .attr("r", d => d.radius)
+                    .attr("fill", d => d.id === CURRENT_OFFICIAL_ID ? currentOfficial.color : d.color),
+                exit => exit.remove()
+            );
+
+            // 6. Apply data binding to SVG (Links)
+            const linksSelection = d3.select("#links").selectAll("line")
+                .data(linksData, d => d.source + '-' + d.target);
+
+            linksSelection.join(
+                enter => enter.append("line")
+                    .attr("class", "link")
+                    .style("stroke-width", 0) 
+                    .call(enter => enter.transition().duration(750) 
+                        .style("stroke-width", d => Math.max(2, Math.sqrt(d.value) / 100))), 
+                update => update.transition().duration(500)
+                    .style("stroke-width", d => Math.max(2, Math.sqrt(d.value) / 100)),
+                exit => exit.remove()
+            );
+
+            // 7. Apply data binding to SVG (Labels)
+            const labelsSelection = d3.select("#labels").selectAll("text")
+                .data(nodesData.filter(d => d.id !== CURRENT_OFFICIAL_ID), d => d.id);
+
+            labelsSelection.join(
+                enter => enter.append("text")
+                    .attr("class", "text-xs font-semibold text-gray-200 fill-current pointer-events-none")
+                    .attr("fill", "#c9d1d9")
+                    .text(d => d.id)
+                    .style("opacity", 0) 
+                    .call(enter => enter.transition().duration(1000).style("opacity", 1)),
+                update => update,
+                exit => exit.remove()
+            );
+
+            // 8. Restart simulation with new data
+            simulation.nodes(nodesData);
+            simulation.force("link").links(linksData);
+            // Run the simulation with less aggression (alpha(0.5)) to allow new nodes to settle 
+            // without drastically rearranging existing ones, since positions are preserved.
+            simulation.alpha(0.5).restart();
+        }
+
+        // --- TIME SLIDER LOGIC ---
+
+        const timelineSlider = document.getElementById('timeline-slider');
+        const startDateLabel = document.getElementById('start-date-label');
+        const endDateLabel = document.getElementById('end-date-label');
+        const currentDateLabel = document.getElementById('current-date-label');
+
+        let MIN_DATE, MAX_DATE;
+
+        // Convert YYYYMM integer to Month Year string
+        function formatDate(dateInt) {
+            const year = Math.floor(dateInt / 100);
+            const monthIndex = (dateInt % 100) - 1;
+            const date = new Date(year, monthIndex);
+            return date.toLocaleString('en-US', { month: 'short', year: 'numeric' });
+        }
+        
+        // Convert slider value (0-100) back to a date (YYYYMM)
+        function sliderValueToDate(value) {
+            if (!MIN_DATE || !MAX_DATE) return MIN_DATE;
+            const dateRange = MAX_DATE - MIN_DATE;
+            const dateStep = dateRange / 100;
+            return Math.floor(MIN_DATE + (value * dateStep));
+        }
+
+        // Set up initial slider values and labels
+        function setupSlider() {
+            const currentData = ALL_CONTRIBUTION_DATA[CURRENT_OFFICIAL_ID];
+            if (!currentData || currentData.length === 0) {
+                timelineSlider.disabled = true;
+                startDateLabel.textContent = "N/A";
+                endDateLabel.textContent = "N/A";
+                currentDateLabel.textContent = "Current Date: N/A";
+                return;
+            }
+
+            MIN_DATE = d3.min(currentData, d => d.date);
+            MAX_DATE = d3.max(currentData, d => d.date);
+            
+            timelineSlider.disabled = false;
+            startDateLabel.textContent = formatDate(MIN_DATE);
+            endDateLabel.textContent = formatDate(MAX_DATE);
+            
+            // Set slider to max value when switching officials to show full web initially
+            timelineSlider.value = 100;
+            const currentDataDate = sliderValueToDate(100);
+            currentDateLabel.textContent = `Current Date: ${formatDate(currentDataDate)}`;
+
+            // Remove previous listeners to prevent duplicates
+            timelineSlider.oninput = null;
+
+            // Set up the event listener
+            timelineSlider.oninput = (event) => {
+                const sliderVal = parseInt(event.target.value);
+                const currentDataDate = sliderValueToDate(sliderVal);
+
+                currentDateLabel.textContent = `Current Date: ${formatDate(currentDataDate)}`;
+                
+                // Update visualization based on the calculated date cutoff
+                updateVisualization(currentDataDate);
+            };
+
+            // Initial visualization load
+            updateVisualization(currentDataDate);
+        }
+
+        // --- SIDEBAR LOGIC ---
+
+        function renderSidebar() {
+            const sidebarContent = document.getElementById('sidebar-content');
+            sidebarContent.innerHTML = '';
+
+            OFFICIALS.forEach(official => {
+                const isActive = official.id === CURRENT_OFFICIAL_ID;
+                const button = document.createElement('button');
+                button.className = `w-full text-left p-3 rounded-lg font-medium shadow-md transition ${
+                    isActive ? 'bg-blue-700/50 text-white' : 'bg-[#1f2832] hover:bg-[#2a333d] text-gray-400'
+                }`;
+                button.textContent = official.display;
+                button.onclick = () => changeOfficial(official.id);
+                sidebarContent.appendChild(button);
+            });
+            // Update the display name in the header
+            document.getElementById('current-official-display').textContent = 
+                OFFICIALS.find(o => o.id === CURRENT_OFFICIAL_ID).display;
+        }
+
+        function changeOfficial(newOfficialId) {
+            if (newOfficialId === CURRENT_OFFICIAL_ID) return;
+
+            CURRENT_OFFICIAL_ID = newOfficialId;
+            OFFICIAL_NODE_DEFINITION = OFFICIALS.find(o => o.id === newOfficialId);
+            
+            // Reset previousTotal to 0 when switching officials
+            previousTotal = 0; 
+
+            // Re-render sidebar to update active state
+            renderSidebar();
+            
+            // Re-initialize D3 structure and forces
+            initializeD3(); 
+
+            // Re-setup slider range and re-run visualization with new data
+            setupSlider();
+        }
+
+        // --- SIDEBAR TOGGLING LOGIC ---
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const sidebarTitle = document.getElementById('sidebar-title');
+            const sidebarContent = document.getElementById('sidebar-content');
+            const collapseIcon = document.getElementById('collapse-icon');
+            const expandIcon = document.getElementById('expand-icon');
+
+            const isCurrentlyExpanded = sidebar.classList.contains('w-64');
+
+            if (isCurrentlyExpanded) {
+                // Collapse
+                sidebar.classList.replace('w-64', 'w-16');
+                sidebar.classList.remove('p-4');
+                sidebar.classList.add('p-2'); 
+
+                sidebarTitle.classList.add('hidden');
+                sidebarContent.classList.add('hidden');
+                collapseIcon.classList.add('hidden');
+                expandIcon.classList.remove('hidden');
+            } else {
+                // Expand
+                sidebar.classList.replace('w-16', 'w-64');
+                sidebar.classList.add('p-4');
+                sidebar.classList.remove('p-2');
+
+                sidebarTitle.classList.remove('hidden');
+                sidebarContent.classList.remove('hidden');
+                collapseIcon.classList.remove('hidden');
+                expandIcon.classList.add('hidden');
+            }
+
+            // After a short delay allowing the CSS transition (300ms) to complete, resize D3 canvas
+            setTimeout(handleResize, 350);
+        }
+
+        // Handles window resize and is called after sidebar toggle
+        function handleResize() {
+            if (!svg || !simulation) return;
+
+            width = svg.node().clientWidth;
+            height = svg.node().clientHeight;
+            
+            // Update the center force
+            simulation.force("center", d3.forceCenter(width / 2, height / 2));
+            
+            // Fix the official node position (center)
+            OFFICIAL_NODE_DEFINITION.fx = width / 2;
+            OFFICIAL_NODE_DEFINITION.fy = height / 2;
+
+            // Restart simulation to take the new center into account
+            simulation.alpha(1).restart();
+        }
+
+
+        // --- INITIALIZATION ---
+
+        window.onload = () => {
+            // Set initial official definition (K. Bassoon)
+            OFFICIAL_NODE_DEFINITION = OFFICIALS.find(o => o.id === CURRENT_OFFICIAL_ID);
+            
+            // 1. Initialize Sidebar UI
+            renderSidebar();
+
+            // 2. Setup D3 environment
+            initializeD3();
+
+            // 3. Setup Timeline and run first visualization update
+            setupSlider();
+            
+            // 4. Add listeners
+            document.getElementById('toggle-sidebar-btn').addEventListener('click', toggleSidebar);
+            window.addEventListener('resize', handleResize);
+        };
+
+    </script>
+</body>
+</html>
