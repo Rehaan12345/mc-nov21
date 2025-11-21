@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MapCzar</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS for mapping -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+          integrity="sha203-A9ItiM1lq72B5k4u+lBvN4xU/z3z6B4x827uJ+3/A6T5rE/4wK3xG2v4dK5I9z9I" crossorigin="" />
+    <!-- Phosphor Icons (for checkmarks and UI icons) -->
+    <script src="https://unpkg.com/@phosphor-icons/web@2.1.1/dist/phosphor.js"></script>
+    <style>
+        /* Custom Apple Maps-like Dark Theme */
+        :root {
+            --map-bg: #1e1e1e; /* Dark background */
+            --sidebar-bg: rgba(30, 30, 30, 0.95); /* Slightly transparent dark sidebar */
+            --text-primary: #f0f0f0;
+            --text-secondary: #aaaaaa;
+            --pin-blue: #007aff; /* Apple Blue */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--map-bg);
+            color: var(--text-primary);
+            overflow: hidden; /* Prevent body scroll */
+        }
+        #map {
+            height: 100vh;
+            width: 100%;
+        }
+        .sidebar {
+            background-color: var(--sidebar-bg);
+            backdrop-filter: blur(10px);
+            box-shadow: 5px 0 15px rgba(0, 0, 0, 0.4);
+            transition: width 0.3s ease;
+        }
+        .directive-item:hover {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+        /* Custom Leaflet Marker Icon (Blue Checkmark Circle) */
+        .policy-marker {
+            background-color: var(--pin-blue);
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 0 0 4px var(--map-bg); /* Halo effect */
+        }
+        .policy-marker i {
+            color: white;
+            font-size: 16px;
+        }
+    </style>
+</head>
+<body class="antialiased">
+
+    <!-- Main Application Container -->
+    <div id="app" class="relative flex h-screen w-screen">
+
+        <!-- Left Sidebar (Apple Maps Style) -->
+        <div id="sidebar" class="sidebar w-80 flex-shrink-0 z-[1001] p-4 flex flex-col">
+            <h1 class="text-2xl font-semibold mb-6 text-white tracking-tight">MapCzar</h1>
+
+            <!-- Search Bar Mockup -->
+            <div class="mb-4">
+                <div class="flex items-center bg-gray-700/50 rounded-lg px-3 py-2 text-sm text-gray-300">
+                    <i class="ph ph-magnifying-glass mr-2 text-lg"></i>
+                    <input type="text" placeholder="Search Policies or Locations" class="bg-transparent w-full focus:outline-none placeholder-gray-500" disabled>
+                </div>
+            </div>
+
+            <!-- Candidate Filters -->
+            <div class="mb-4 border-b border-gray-700/50 pb-4">
+                <p class="text-sm font-medium text-gray-400 mb-2">Leaders</p>
+                <div id="candidate-filters" class="flex flex-col space-y-2">
+                    <!-- Filters populated by JS -->
+                </div>
+            </div>
+
+            <!-- Directives List -->
+            <div class="flex-grow overflow-y-auto">
+                <p class="text-sm font-medium text-gray-400 mb-2">Directives (<span id="directive-count">0</span>)</p>
+                <div id="directives-list" class="space-y-1">
+                    <!-- List populated by JS -->
+                </div>
+            </div>
+
+            <div class="mt-4 text-xs text-gray-600 border-t border-gray-700/50 pt-2">
+                *Locations are mocked for demonstration purposes.
+            </div>
+        </div>
+
+        <!-- Map Container -->
+        <div id="map" class="flex-grow z-[1000]"></div>
+
+    </div>
+
+    <!-- Directive Detail Modal -->
+    <div id="detail-modal" class="hidden fixed inset-0 bg-black/50 backdrop-blur-sm z-[10002] flex items-center justify-center p-4" onclick="document.getElementById('detail-modal').classList.add('hidden')">
+        <div class="bg-gray-800 p-6 rounded-xl w-full max-w-2xl shadow-2xl" onclick="event.stopPropagation()">
+            <h2 id="modal-title" class="text-2xl font-bold mb-2 text-blue-400"></h2>
+            <p id="modal-candidate" class="text-sm text-gray-400 mb-4"></p>
+            <div class="space-y-4">
+                <div>
+                    <h3 class="font-semibold text-gray-300">Issue Dates:</h3>
+                    <p id="modal-dates" class="text-sm text-gray-200"></p>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-gray-300">Summary:</h3>
+                    <p id="modal-summary" class="text-sm text-gray-200 leading-relaxed"></p>
+                </div>
+                <div>
+                    <h3 class="font-semibold text-gray-300 mb-1">Addresses/Locations of Effect:</h3>
+                    <ul id="modal-locations" class="list-disc list-inside text-xs text-gray-400 max-h-40 overflow-y-auto p-2 bg-gray-900/50 rounded-lg">
+                        <!-- Locations populated by JS -->
+                    </ul>
+                </div>
+            </div>
+            <button class="mt-6 w-full py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-white font-medium transition" onclick="document.getElementById('detail-modal').classList.add('hidden')">
+                Close
+            </button>
+        </div>
+    </div>
+
+
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+            integrity="sha203-z03/Q0oW2gVfJbV8Q+h+e0R52T6aY8i0f5C5s6f3x4d6F3n6C8I1r5/B/9g5D/h/qG" crossorigin=""></script>
+
+    <script>
+        // Data structure for the directives from all candidates
+        const DIRECTIVES_DATA = [
+            // --- Karen Bass Data ---
+            {
+                "Candidate": "Karen Bass (Current)",
+                "Color": "#007aff", // Apple Blue
+                "Policies": [
+                    {
+                        "Title": "Expedition of Permits and Clearances for Temporary Shelters and Affordable Housing Types",
+                        "Dates": "Issue Date: Dec 16, 2022; Revised: Jul 1, 2024",
+                        "Addresses/Locations": [ "Los Angeles City Charter", "LAMC Section 12.03", "Very High Fire Hazard Severity Zone", "Westwood Village Specific Plan", "Los Angeles Housing Department (LAHD)", "USC Village" ],
+                        "Summary": "This directive speeds up and simplifies the permitting process for 100% affordable housing projects and temporary shelters. It waives some discretionary reviews, requires city departments to finish reviews in specified short timeframes, and coordinates payments and placement with housing authorities to move unhoused people into housing faster.",
+                        "Coordinates": [
+                            { "lat": 34.0270, "lng": -118.2870, "label": "USC Village AOE" }, // Near center of screenshot
+                            { "lat": 34.0500, "lng": -118.2500, "label": "City Hall AOE" } // Downtown LA
+                        ],
+                        "AreaType": "Point"
+                    },
+                    {
+                        "Title": "Inside Safe Initiative",
+                        "Dates": "Issue Date: December 21, 2022",
+                        "Addresses/Locations": [ "City of Los Angeles", "Los Angeles City Council", "Los Angeles Homeless Services Authority", "Metro (Los Angeles)", "Echo Park Community Design Overlay (CDO) District" ],
+                        "Summary": "This initiative is a housing-led strategy to bring people from street encampments into temporary (interim) housing and eventually into permanent housing. It sets up a cross-department “Cabinet” of city and county agencies and service providers to coordinate outreach, move people inside quickly, and provide wrap-around care.",
+                        "Coordinates": [
+                            { "lat": 34.0725, "lng": -118.2510, "label": "Echo Park Encampment Focus" },
+                            { "lat": 34.0600, "lng": -118.3000, "label": "Mid-City Services Hub" }
+                        ],
+                        "AreaType": "Point"
+                    },
+                    {
+                        "Title": "Temporary Use of Hotel Rooms Under the Residential Hotel Ordinance for Interim Housing",
+                        "Dates": "Issue Date: November 1, 2023",
+                        "Addresses/Locations": [ "Los Angeles Municipal Code § 47.70", "Los Angeles Housing Department" ],
+                        "Summary": "This directive lets the city use rooms in residential hotels (under the RHO) as interim housing for people experiencing homelessness. It expands on the Inside Safe approach by formally allowing more hotel rooms to serve as temporary housing, removing some regulatory barriers.",
+                        "Coordinates": [ { "lat": 34.0300, "lng": -118.2600, "label": "RHO Zone" } ],
+                        "AreaType": "Point"
+                    },
+                    {
+                        "Title": "Streamlining and Accelerating Housing Production",
+                        "Dates": "Issue Date: November 8, 2023",
+                        "Addresses/Locations": [ "California Environmental Quality Act (CEQA)", "Department of City Planning", "BuildLA" ],
+                        "Summary": "This directive is about cutting red tape to build more housing (affordable and mixed-income) faster. It asks for more ‘ministerial’ approvals and directs a working group to find ways to speed up permitting, environmental review, and other major bottlenecks.",
+                        "Coordinates": [ { "lat": 34.0150, "lng": -118.2950, "label": "LA Planning Dept AOE" } ],
+                        "AreaType": "Point"
+                    }
+                ]
+            },
+            // --- Mock Candidate B Data ---
+            {
+                "Candidate": "Candidate B (Former Councilmember)",
+                "Color": "#9d8aff", // Purple
+                "Policies": [
+                    {
+                        "Title": "Revitalization of Hollywood Infrastructure",
+                        "Dates": "Issue Date: June 15, 2020",
+                        "Addresses/Locations": [ "Hollywood Boulevard", "Hollywood Historic Preservation Overlay Zone (HPOZ)" ],
+                        "Summary": "Focused infrastructure investments in the Hollywood area, including street repair and cultural district promotion.",
+                        "Coordinates": [ { "lat": 34.1000, "lng": -118.3300, "label": "Hollywood Revitalization Zone" } ],
+                        "AreaType": "Point"
+                    },
+                    {
+                        "Title": "Digital Arts & Technology Incubator Fund",
+                        "Dates": "Issue Date: January 10, 2021",
+                        "Addresses/Locations": [ "Downtown Los Angeles", "Arts District" ],
+                        "Summary": "A private-public partnership to fund new technology and arts startups in designated downtown zones.",
+                        "Coordinates": [ { "lat": 34.0400, "lng": -118.2350, "label": "DTLA Arts District Hub" } ],
+                        "AreaType": "Point"
+                    }
+                ]
+            },
+            // --- Mock Candidate C Data ---
+            {
+                "Candidate": "Candidate C (Former Controller)",
+                "Color": "#44c767", // Green
+                "Policies": [
+                    {
+                        "Title": "Financial Transparency and Budget Audit Initiative",
+                        "Dates": "Issue Date: October 1, 2021",
+                        "Addresses/Locations": [ "City Administrative Officer (CAO)", "Office of Finance", "All City Departments" ],
+                        "Summary": "A mandate for deep financial audits across all city departments to identify waste and improve budget transparency.",
+                        "Coordinates": [ { "lat": 34.0550, "lng": -118.2450, "label": "Financial Oversight Center" } ],
+                        "AreaType": "Point"
+                    },
+                    {
+                        "Title": "Public Park Safety and Lighting Upgrade Program",
+                        "Dates": "Issue Date: May 5, 2022",
+                        "Addresses/Locations": [ "Department of Recreation and Parks", "Griffith Park", "Exposition Park" ],
+                        "Summary": "Allocated funds for enhanced safety patrols and modernization of lighting systems in major public parks.",
+                        "Coordinates": [ { "lat": 34.1350, "lng": -118.2940, "label": "Griffith Park AOE" } ],
+                        "AreaType": "Point"
+                    }
+                ]
+            }
+        ];
+
+        let map;
+        let activeCandidates = ["Karen Bass (Current)", "Candidate B (Former Councilmember)", "Candidate C (Former Controller)"];
+        const markers = L.layerGroup(); // Layer to hold all markers for easy clearing/filtering
+
+        // Function to initialize the map
+        function initMap() {
+            // Leaflet requires a tile layer. We use a dark/grayscale map style for the Apple Maps aesthetic.
+            map = L.map('map', {
+                zoomControl: false, // We'll manually position it or omit it
+                maxZoom: 18,
+                minZoom: 10
+            }).setView([34.04, -118.28], 12); // Center on Los Angeles (near USC area from screenshot)
+
+            // CartoDB Dark Matter tiles for a dark-mode look
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>',
+                subdomains: 'abcd',
+                maxZoom: 19
+            }).addTo(map);
+
+            markers.addTo(map);
+
+            renderFilters();
+            renderMapAndSidebar();
+        }
+
+        // Custom Blue Checkmark Icon for policy markers
+        function createPolicyMarkerIcon(color) {
+            return L.divIcon({
+                className: 'custom-div-icon',
+                html: `<div class="policy-marker" style="background-color: ${color}; box-shadow: 0 0 0 4px ${getComputedStyle(document.body).getPropertyValue('--map-bg')};"><i class="ph ph-check-circle text-white"></i></div>`,
+                iconSize: [28, 28],
+                iconAnchor: [14, 14]
+            });
+        }
+
+        // Function to render markers and sidebar list based on active candidates
+        function renderMapAndSidebar() {
+            // Clear existing markers
+            markers.clearLayers();
+
+            const listContainer = document.getElementById('directives-list');
+            listContainer.innerHTML = '';
+            let directiveCount = 0;
+
+            DIRECTIVES_DATA.forEach(candidateData => {
+                if (activeCandidates.includes(candidateData.Candidate)) {
+                    const candidateColor = candidateData.Color;
+
+                    candidateData.Policies.forEach(policy => {
+                        directiveCount++;
+
+                        // 1. Render Sidebar Item
+                        const listItem = document.createElement('div');
+                        listItem.className = `directive-item p-3 rounded-lg cursor-pointer flex items-start space-x-3 transition`;
+                        listItem.innerHTML = `
+                            <div class="pt-1">
+                                <i class="ph ph-circle-fill text-[${candidateColor}]" style="color: ${candidateColor}; font-size: 8px;"></i>
+                            </div>
+                            <div>
+                                <p class="text-sm font-medium text-white">${policy.Title}</p>
+                                <p class="text-xs text-gray-500">${candidateData.Candidate.split(' ')[0]} - ${policy.Dates.split(';')[0].split(': ')[1]}</p>
+                            </div>
+                        `;
+                        listItem.onclick = () => {
+                            // Find the first coordinate and zoom to it
+                            if (policy.Coordinates && policy.Coordinates.length > 0) {
+                                map.setView([policy.Coordinates[0].lat, policy.Coordinates[0].lng], 14);
+                                // Optional: trigger the modal for the first coordinate's location
+                                showDirectiveDetails(policy, candidateData.Candidate);
+                            }
+                        };
+                        listContainer.appendChild(listItem);
+
+
+                        // 2. Render Map Markers
+                        policy.Coordinates.forEach(coord => {
+                            const customIcon = createPolicyMarkerIcon(candidateColor);
+                            const marker = L.marker([coord.lat, coord.lng], { icon: customIcon });
+
+                            marker.on('click', () => {
+                                showDirectiveDetails(policy, candidateData.Candidate);
+                            });
+
+                            markers.addLayer(marker);
+                        });
+                    });
+                }
+            });
+
+            document.getElementById('directive-count').textContent = directiveCount;
+        }
+
+        // Function to render candidate filters
+        function renderFilters() {
+            const filterContainer = document.getElementById('candidate-filters');
+            filterContainer.innerHTML = '';
+
+            DIRECTIVES_DATA.forEach(candidateData => {
+                const isChecked = activeCandidates.includes(candidateData.Candidate);
+
+                const filterItem = document.createElement('label');
+                filterItem.className = 'flex items-center space-x-2 text-sm cursor-pointer';
+                filterItem.innerHTML = `
+                    <input type="checkbox" data-candidate="${candidateData.Candidate}" ${isChecked ? 'checked' : ''}
+                           class="form-checkbox h-4 w-4 rounded border-gray-600 focus:ring-blue-500 bg-gray-700/50"
+                           style="color: ${candidateData.Color}; accent-color: ${candidateData.Color};"
+                           onchange="toggleCandidate(event)">
+                    <span class="text-white">${candidateData.Candidate}</span>
+                `;
+                filterContainer.appendChild(filterItem);
+            });
+        }
+
+        // Function to handle filter toggles
+        function toggleCandidate(event) {
+            const candidateName = event.target.dataset.candidate;
+            if (event.target.checked) {
+                if (!activeCandidates.includes(candidateName)) {
+                    activeCandidates.push(candidateName);
+                }
+            } else {
+                activeCandidates = activeCandidates.filter(c => c !== candidateName);
+            }
+            renderMapAndSidebar();
+        }
+
+        // Function to display the directive details modal
+        function showDirectiveDetails(policy, candidateName) {
+            document.getElementById('modal-title').textContent = policy.Title;
+            document.getElementById('modal-candidate').textContent = `Policy by: ${candidateName}`;
+            document.getElementById('modal-dates').textContent = policy.Dates;
+            document.getElementById('modal-summary').textContent = policy.Summary;
+
+            const locList = document.getElementById('modal-locations');
+            locList.innerHTML = '';
+            // FIX: Use bracket notation to access the property "Addresses/Locations" since it contains a slash.
+            policy["Addresses/Locations"].forEach(loc => {
+                const li = document.createElement('li');
+                li.textContent = loc;
+                locList.appendChild(li);
+            });
+
+            document.getElementById('detail-modal').classList.remove('hidden');
+        }
+
+
+        // Initialize the app once the window loads
+        window.onload = initMap;
+    </script>
+</body>
+</html>
